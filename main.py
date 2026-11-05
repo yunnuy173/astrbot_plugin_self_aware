@@ -2230,14 +2230,48 @@ class Main(Star):
         return re.sub(r"\s+", " ", arg).strip()
 
     # ---------- 让模型自己挑指令（兜底，最像"理解"的一层） ----------
-    async def _llm_route(self, text):
+    async def _recent_context(self, event, n=6):
+        """最近几轮对话；拿不到就返回空串"""
+        try:
+            cm = getattr(self.context, "conversation_manager", None)
+            if not cm or event is None:
+                return ""
+            umo = getattr(event, "unified_msg_origin", "")
+            if not umo:
+                return ""
+            cid = await asyncio.wait_for(cm.get_curr_conversation_id(umo), timeout=5)
+            if not cid:
+                return ""
+            conv = await asyncio.wait_for(cm.get_conversation(umo, cid), timeout=5)
+            hist = getattr(conv, "history", None) if conv else None
+            if not hist:
+                return ""
+            rows = json.loads(hist) if isinstance(hist, str) else list(hist)
+            out = []
+            for m in rows[-n:]:
+                role = "你" if (m.get("role") == "assistant") else "对方"
+                c = m.get("content")
+                if isinstance(c, list):
+                    c = " ".join(str(x.get("text") or "") for x in c if isinstance(x, dict))
+                c = re.sub(r"\s+", " ", str(c or "")).strip()
+                if c:
+                    out.append("%s：%s" % (role, c[:120]))
+            return "\n".join(out)
+        except Exception as e:
+            _log("读上下文失败: %r" % e)
+            return ""
+
+    async def _llm_route(self, text, event=None):
         """把这句话和候选指令一起给模型，让它输出 {"cmd":..., "arg":...}"""
         if not self._cfg("llm_route", True):
             return None
         t = (text or "").strip()
         if not t or len(t) > 40:
             return None
-        if not re.match(r"^\s*(?:发|来|给|找|搜|唱|点|放|换|查|看|要|弄|帮|用|把|让|试)", t):
+        ctx = await self._recent_context(event)
+        # 有上下文时，短句/没动词的说法也可能是"接着让机器人做事"，不拦
+        if not ctx and not re.match(
+                r"^\s*(?:发|来|给|找|搜|唱|点|放|换|查|看|要|弄|帮|用|把|让|试)", t):
             return None
         try:
             provider = self.context.get_using_provider()
@@ -2260,11 +2294,13 @@ class Main(Star):
                             ("（模板 %s）" % c["template"]) if c["template"] else "")
             for c in cands)
         prompt = (
-            "用户说了一句话，你要判断他想让机器人用哪个能力，并把参数填进模板。\n"
-            "可选能力（名字：说明（模板））：\n" + listing + "\n\n"
-            "只输出 JSON：{\"name\":\"能力名字\",\"arg\":\"参数\"}；"
-            "如果都不合适就输出 {\"name\":null}。不要解释。\n"
-            "用户说：" + t
+            "你要判断用户这句话是不是在让机器人做一件本机能做的事，并选能力、填参数。\n"
+            + (("最近的对话（供你理解上下文，别照抄）：\n" + ctx + "\n\n") if ctx else "")
+            + "可选能力（名字：说明（模板））：\n" + listing + "\n\n"
+            "注意：如果这句话是在接着上文让机器人做事（哪怕只有一两个词），也要选出来；"
+            "如果只是聊天、回答、感慨，就输出 {\"name\":null}。\n"
+            "只输出 JSON：{\"name\":\"能力名字\",\"arg\":\"参数\"}。不要解释。\n"
+            "用户刚说：" + t
         )
         try:
             resp = await asyncio.wait_for(
@@ -2464,15 +2500,22 @@ class Main(Star):
             cmds = [c for c in (cap.get("cmds") or []) if c.get("kind") not in ("tool", "regex")]
             if not cmds:
                 continue
+            # 这句话得是"在点单"（发/来/搜/唱/查…开头），单个词不算
+            if not any(t.startswith(w) for w in self.DISPATCH_TRIGGERS):
+                continue
             cg = self._grams(self._cap_blob(cap))
             overlap = len(g & cg)
             if overlap < 2:
                 continue
-            # 命令名直接出现，优先用它
+            # 命令名直接出现，优先用它；否则用第一条能对上的命令
             target, boost = cmds[0], 0.0
             for c in cmds:
-                if c.get("cmd") and c["cmd"] in t:
+                name, doc = c.get("cmd") or "", c.get("doc") or ""
+                if name and name in t:
                     target, boost = c, 3.0
+                    break
+                if len(g & self._grams(name + doc)) >= 2:
+                    target, boost = c, 0.0
                     break
             arg = _clean_arg(self._strip_arg(t, cap), limit=30)
             if not arg:
@@ -3084,7 +3127,7 @@ class Main(Star):
                         _log("通用兜底选了 /%s，动作对不上，丢弃" % nm)
             notes.append("通用:%s" % ("命中" if cmd else "无"))
             if not cmd and not tool_call and not regex_call:
-                r = await self._llm_route(text)
+                r = await self._llm_route(text, event)
                 notes.append("模型:%s" % ("选了" if r else "没选"))
                 if r:
                     if r.startswith("#"):
@@ -3167,7 +3210,7 @@ class Main(Star):
                 return
             cmd = ("/%s %s" % (_c, _a)).strip() if _a else "/" + _c
             self._note_thought("语义直连：%s → %s（%s）" % (text[:40], cmd, label))
-            _log("语义直连：%s → %s" % (text[:30], cmd))
+            _log("语义直连：%s → %s（%s）" % (text[:30], cmd, label or "?"))
             # 后台跑，不阻塞管线：图片/翻唱这类本来就慢
             async def _runner(ev=event, c=_c, a=_a):
                 ok = False
