@@ -154,12 +154,6 @@
     "default": "",
     "hint": "留空=自动识别，一般不用填"
   },
-  "capture_logs": {
-    "description": "记录运行日志",
-    "type": "bool",
-    "default": true,
-    "hint": "开着她才能用 /日志 自己查问题；存在 logs/ 下"
-  },
   "auto_compat": {
     "description": "（旧）启用「自兼容」正则规则",
     "type": "bool",

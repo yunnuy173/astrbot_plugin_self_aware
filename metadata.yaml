@@ -3,6 +3,6 @@ display_name: 能力自省
 desc: 让 bot 知道自己的本事并用起来：运行时能力表（命令 + 工具）、能力画像、语义直连、工具直连，附带推理档位、思考流和余额提醒。没有命令的插件也能被她用上。
 short_desc: 知道自己会什么，并在该用的时候用掉
 author: 鲸娘
-version: 2.9.16
+version: 2.9.20
 repo: https://github.com/yunnuy173/astrbot_plugin_self_aware
 astrbot_version: ">=4.16,<5"

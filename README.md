@@ -187,9 +187,23 @@ plugin_data/astrbot_plugin_self_aware/profiles/<插件名>.json
   manuals/<插件>.txt       简易说明书
   auto_rules.json          自兼容规则
   tool_state.json          不直连的工具
+  actions.json             执行记录（她做过什么、成没成）
+  timings.json             每条命令的耗时
+  sent.json                最近发出去的回复（按会话）
   thoughts/YYYY-MM-DD.log  思考流
-  logs/YYYY-MM-DD.log      运行日志
+  logs/YYYY-MM-DD.log      运行日志（只记本插件自己的）
 ```
+
+## 日志从哪来（重要）
+
+本插件**不接管任何 logger、不挂 handler、不读数据库**，只做两件事：
+
+1. 用 `astrbot.api.logger` 记录自己的日志，同时往 `logs/YYYY-MM-DD.log` 追加一份；
+2. 如果你在 AstrBot 设置里开了「把日志记录到文件」（`log_file_enable`，默认关闭），
+   `/日志` 和失败诊断会**直接读那个日志文件**，这样能看到所有插件的信息；
+   没开的时候就只显示本插件自己的日志。
+
+两种方式都不修改框架的日志系统，属于“只读”。
 
 ## 跨会话
 

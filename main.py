@@ -84,6 +84,10 @@ MANUAL_DIR = os.path.join(CACHE_DIR, "manuals")
 
 def _log(msg):
     logger.info("[能力自省] %s" % msg)
+    try:
+        _LOGBOOK.add("[能力自省] " + str(msg))
+    except Exception:
+        pass
 
 
 def _read_json(p, default):
@@ -159,14 +163,13 @@ def _read_plugin_doc(folder, limit=4000):
     return ""
 
 
-class _LogTapper(object):
-    """把运行日志留一份，让她能自己查刚才发生了什么"""
+class _LogBook(object):
+    """本插件自己的运行日志：只写自己的文件，不碰任何 logger 的 handler"""
 
     def __init__(self, keep=1200):
         self.lines = []
         self.keep = keep
         self.path = ""
-        self.handler = None
 
     def _ensure_path(self):
         if self.path:
@@ -176,71 +179,26 @@ class _LogTapper(object):
         os.makedirs(d, exist_ok=True)
         self.path = os.path.join(d, _dt.datetime.now().strftime("%Y-%m-%d.log"))
 
-    def attach(self):
-        if self.handler is not None:
-            return
-        import logging
-
-        outer = self
-
-        class H(logging.Handler):
-            def emit(self, record):
-                try:
-                    msg = record.getMessage()
-                    line = "[%s] [%s] %s: %s" % (
-                        time.strftime("%H:%M:%S"), record.levelname,
-                        record.name.split(".")[-1], msg)
-                    outer.lines.append(line)
-                    if len(outer.lines) > outer.keep:
-                        del outer.lines[:len(outer.lines) - outer.keep]
-                    if record.levelno >= logging.INFO:
-                        outer._ensure_path()
-                        with io.open(outer.path, "a", encoding="utf-8") as f:
-                            f.write(line + "\n")
-                except Exception:
-                    pass
-
-        self.handler = H()
-        self.handler.setLevel(0)
+    def add(self, msg, level="INFO"):
         try:
-            setattr(self.handler, "_sa_tapper", True)   # 打个标记，重载时好摘
+            line = "[%s] [%s] %s" % (time.strftime("%H:%M:%S"), level, str(msg))
+            self.lines.append(line)
+            if len(self.lines) > self.keep:
+                del self.lines[:len(self.lines) - self.keep]
+            self._ensure_path()
+            with io.open(self.path, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
         except Exception:
             pass
-        root = logging.getLogger()
-        targets = [root]
-        # AstrBot 给插件 logger 设了 propagate=False，只挂根 logger 收不到插件自己的日志，
-        # 所以再显式挂一份到 astrbot.plugin.<插件名> 上
-        try:
-            plog = logging.getLogger("astrbot.plugin." + PLUGIN_NAME)
-            self.plog = plog
-            if plog not in targets:
-                targets.append(plog)
-        except Exception:
-            pass
-        for lg in targets:
-            # 插件热重载时旧实例的 handler 还留在 logger 上，不清掉日志会一行写好几遍。
-            # 老版本没打标记，所以按"类所在的模块"认领：本插件模块里定义的 handler 都清掉
-            for hd in list(lg.handlers):
-                own = getattr(hd, "_sa_tapper", False)
-                mod = str(getattr(type(hd), "__module__", "") or "")
-                if own or PLUGIN_NAME in mod:
-                    try:
-                        lg.removeHandler(hd)
-                    except Exception:
-                        pass
-            lg.addHandler(self.handler)
-        try:
-            if root.level > 20 or root.level == 0:
-                root.setLevel(20)
-        except Exception:
-            pass
-        _log("日志捕获已挂上")
 
     def tail(self, n=40, keyword=""):
         pool = self.lines
         if keyword:
             pool = [x for x in pool if keyword in x]
         return pool[-int(n):]
+
+
+_LOGBOOK = _LogBook()
 
 
 @register(PLUGIN_NAME, "鲸娘", "让 bot 认识、理解并使用自己的能力（命令与工具都算）", "2.5.0")
@@ -250,15 +208,11 @@ class Main(Star):
         self.config = config or {}
         self._caps = []
         self._fp = ""
-        self._tapper = _LogTapper()
-        try:
-            self._tapper.attach()
-        except Exception:
-            pass
         self._register_web_apis()
         self._last_error = ""
         self._diag_ts = 0.0
         self._last_cap = {}
+        self._talk_ts = {}
         self._last_output = []
 
     # ---------- 配置 ----------
@@ -276,22 +230,65 @@ class Main(Star):
         here = os.path.dirname(os.path.abspath(__file__))
         return os.path.dirname(here)
 
+    # ---------- 日志：优先读 AstrBot 自己的日志文件（合规做法） ----------
+    def _astrbot_log_file(self):
+        """AstrBot 的日志文件，只有在用户开了“记录到文件”时才有"""
+        try:
+            cfg = self.context.get_config() or {}
+            if not bool(cfg.get("log_file_enable", False)):
+                return ""
+            p = str(cfg.get("log_file_path") or "logs/astrbot.log")
+        except Exception:
+            return ""
+        try:
+            if not os.path.isabs(p):
+                from astrbot.core.utils.astrbot_path import get_astrbot_data_path
+                p = os.path.join(str(get_astrbot_data_path()), p)
+        except Exception:
+            return ""
+        return p if os.path.isfile(p) else ""
+
+    def _tail_file(self, path, n=60, keyword="", max_bytes=256 * 1024):
+        """只读文件末尾，别把整份日志读进内存"""
+        try:
+            size = os.path.getsize(path)
+            with io.open(path, "rb") as f:
+                if size > max_bytes:
+                    f.seek(size - max_bytes)
+                data = f.read()
+            lines = data.decode("utf-8", "replace").splitlines()
+        except Exception:
+            return []
+        if keyword:
+            lines = [x for x in lines if keyword in x]
+        return lines[-int(n):]
+
+    def _log_lines(self, n=40, keyword=""):
+        """先看 AstrBot 的日志文件；没有就退回本插件自己的日志"""
+        p = self._astrbot_log_file()
+        if p:
+            rows = self._tail_file(p, n, keyword)
+            if rows:
+                return rows
+        return _LOGBOOK.tail(n, keyword)
+
     # ---------- 扫描 ----------
     def _disabled(self):
+        """哪些插件被停用了：问框架（star_map），不直接读数据库"""
         try:
-            import sqlite3
-            db = os.path.join(os.path.dirname(self._plugins_dir()), "data_v4.db")
-            if not os.path.exists(db):
-                return set()
-            con = sqlite3.connect(db)
-            row = con.execute("select value from preferences where key='inactivated_plugins'").fetchone()
-            con.close()
-            if not row:
-                return set()
-            data = json.loads(row[0]).get("val") or []
-            return set(x.split(".")[2] for x in data if x.startswith("data.plugins."))
+            from astrbot.core.star.star import star_map
         except Exception:
             return set()
+        out = set()
+        try:
+            for module_path, meta in list(star_map.items()):
+                if getattr(meta, "activated", True):
+                    continue
+                parts = str(module_path).split(".")
+                out.add(parts[2] if len(parts) >= 3 else parts[-1])
+        except Exception:
+            return set()
+        return out
 
     def _meta(self, folder):
         for name in ("metadata.yaml", "metadata.yml"):
@@ -1709,10 +1706,37 @@ class Main(Star):
         d[cmd] = {"avg": round(avg, 1), "n": n, "slow": cnt}
         _write_json(self.TIMING_FILE, d)
 
-    async def _self_report(self, event, label, args, ok, note):
-        """她自己动手之后，用自己的口吻补一句"""
+    def _cmd_meaning(self, cmd):
+        """这条命令实际在干什么（别让她把 p 理解成 P图）"""
+        try:
+            cap, short = self._resolve_cap_cmd(cmd)
+            if not cap:
+                return ""
+            prof = self._profile(cap.get("plugin")) or {}
+            for d in (prof.get("commands") or []):
+                dc = str(d.get("cmd") or "")
+                if dc and short and dc.startswith("#") and short in dc and d.get("what"):
+                    return str(d.get("what"))[:50]
+            for d in (prof.get("commands") or []):
+                if short and short in str(d.get("cmd") or "") and d.get("what"):
+                    return str(d.get("what"))[:50]
+            return (cap.get("desc") or "")[:50]
+        except Exception:
+            return ""
+
+    async def _self_report(self, event, label, args, ok=True, note="", phase="after"):
+        """用她自己的口吻说话：phase=before 说"我要去做"，after 说"做完了/没成" """
         if not self._cfg("self_report", True) or event is None:
             return
+        # 同一个会话 10 秒内最多一句，别啰嗦
+        try:
+            umo = getattr(event, "unified_msg_origin", "")
+            now = time.time()
+            if now - float(self._talk_ts.get(umo) or 0) < 10:
+                return
+            self._talk_ts[umo] = now
+        except Exception:
+            pass
         try:
             provider = self.context.get_using_provider()
         except Exception:
@@ -1728,22 +1752,30 @@ class Main(Star):
                 system_prompt = getattr(p, "system_prompt", None)
         except Exception:
             system_prompt = None
-        fact = ("做成了" + ("，结果是：" + note[:60] if note else "")) if ok else \
-               ("没做成" + ("，原因是：" + note[:60] if note else ""))
-        prompt = (
-            "你刚刚自己主动做了一件事（不是对方要求的）：你执行了「%s %s」，%s。\n"
-            "用你自己的口吻跟对方说一句，让他知道这件事。\n"
-            "要求：只说一句；口语；别客套、别道歉套话、别说“好的”；"
-            "别解释步骤；别把命令原样念出来；别用括号；不要问他要不要。"
-            % (label, args, fact))
+        meaning = self._cmd_meaning(label)
+        what = ("（这条命令实际是：%s）" % meaning) if meaning else ""
+        if phase == "before":
+            fact = "你正要去做这件事：%s %s%s" % (label, args, what)
+            ask = ("用你自己的口吻，跟对方说一句你要去做什么。\n"
+                   "要求：只说一句；口语；别客套；别说“请稍等/马上就好”这种客服话；"
+                   "别解释步骤；别用括号；别把命令名照字面理解；可以带一点你自己的情绪或判断。")
+        else:
+            done = ("做成了" + ("，结果：" + note[:60] if note else "")) if ok else \
+                   ("没做成" + ("，原因：" + note[:60] if note else ""))
+            fact = "你刚做完这件事：%s %s%s，%s" % (label, args, what, done)
+            ask = ("用你自己的口吻，跟对方说一句结果。\n"
+                   "要求：只说一句；口语；别客套；别复述内容；别用括号；"
+                   "可以评价一下、可以带点情绪；如果没成，就直说没成。")
+        prompt = fact + "\n" + ask
         try:
             resp = await asyncio.wait_for(
                 provider.text_chat(prompt=prompt, contexts=[], system_prompt=system_prompt),
                 timeout=15)
             line = (getattr(resp, "completion_text", "") or "").strip()
             if line:
+                line = line.strip("（）()")
                 await self._emit_result(event, line[:200])
-                _log("自我反馈：%s" % line[:60])
+                _log("她说（%s）：%s" % (phase, line[:60]))
         except Exception as e:
             _log("自我反馈失败: %r" % e)
 
@@ -1788,7 +1820,12 @@ class Main(Star):
         if not done:
             _log("命令执行超过 %ds，转后台继续，结果出来会自己发" % seconds)
             self._note_timing(label, slow=True)
-            if event is not None:
+            if report and event is not None and not task.done():
+                try:
+                    await self._self_report(event, label, args, phase="before")
+                except Exception:
+                    pass
+            elif event is not None:
                 try:
                     await self._emit_result(event, "（这个要跑一会儿，我先去做，好了直接发出来）")
                 except Exception:
@@ -2331,6 +2368,9 @@ class Main(Star):
             return None
         _log("模型层：选了 %s / %s" % (name[:20], arg[:20]))
         if pick["template"] and "{arg}" in pick["template"]:
+            if not _clean_arg(arg, limit=30):
+                _log("模型层：%s 需要参数但没给，放弃" % name[:20])
+                return None
             return pick["template"].replace("{arg}", _clean_arg(arg, limit=30))
         # 没有模板就不知道正确写法，宁可放弃，也不要拼出错误的 /点歌
         if pick.get("kind") == "regex" or not pick["key"]:
@@ -2752,7 +2792,7 @@ class Main(Star):
             provider = None
         if not provider:
             return ""
-        logs = self._tapper.tail(60)
+        logs = self._log_lines(60)
         bad = [x for x in logs
                if re.search(r"失败|错误|异常|超时|拒绝|Traceback|Error|WARN|拒绝访问", x)][-8:]
         tail = "\n".join(bad) or "\n".join(logs[-5:])
@@ -3213,14 +3253,9 @@ class Main(Star):
             _log("语义直连：%s → %s（%s）" % (text[:30], cmd, label or "?"))
             # 后台跑，不阻塞管线：图片/翻唱这类本来就慢
             async def _runner(ev=event, c=_c, a=_a):
-                ok = False
-                try:
-                    ok = await asyncio.wait_for(self._invoke_command(ev, c, a), timeout=180)
-                except asyncio.TimeoutError:
-                    _log("直接执行 /%s 超时（180 秒）" % c)
-                except BaseException as e2:
-                    _log("直接执行 /%s 异常: %r" % (c, e2))
-                if not ok:
+                ok = await self._grace(self._invoke_command(ev, c, a), 8,
+                                       label=c, event=ev, args=a, report=True)
+                if ok is False:
                     await self._report_failure(
                         ev, "执行指令 /%s %s" % (c, a or "（无参数）"), self._last_error)
             t = asyncio.get_event_loop().create_task(_runner())
@@ -3400,7 +3435,7 @@ class Main(Star):
         _log("工具 run_capability：%s/%s %s" % (where, short, arg))
         # 有的命令要跑几分钟（下载/变声/渲染），不能把她的回复卡在那里等
         ok = await self._grace(self._invoke_command(ev, short, arg), 8,
-                               label=short, event=ev, args=arg, target=where)
+                               label=short, event=ev, args=arg, target=where, report=True)
         if ok is None:
             _log("run_capability：/%s 还在跑，先放她回话，结果出来会自己发到会话里" % short)
             return json.dumps({
@@ -3563,10 +3598,9 @@ class Main(Star):
         except Exception:
             pass
         try:
-            if self._cfg("capture_logs", True):
-                self._tapper.attach()
-        except Exception as e:
-            _log("挂日志失败: %r" % e)
+            _log("运行日志已就绪（只记本插件自己的日志）")
+        except Exception:
+            pass
         try:
             if self._cfg("enable_balance_alert", True):
                 t = asyncio.get_event_loop().create_task(self._beg_loop())
@@ -3625,9 +3659,9 @@ class Main(Star):
                 n = max(5, min(80, int(tok)))
             else:
                 kw += tok
-        lines = self._tapper.tail(n, kw)
+        lines = self._log_lines(n, kw)
         if not lines:
-            yield event.plain_result("没有日志（可能刚重启，或者没开 capture_logs）。")
+            yield event.plain_result("还没有日志（刚重启的话，跑一会儿就有了）。")
             return
         body = "\n".join(lines)
         yield event.plain_result(body[-1800:])
@@ -3646,7 +3680,7 @@ class Main(Star):
                 return
         except Exception:
             pass
-        lines = self._tapper.tail(30)
+        lines = self._log_lines(30)
         if not lines:
             return
         event.stop_event()
