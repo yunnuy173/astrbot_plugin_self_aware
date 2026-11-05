@@ -4,5 +4,5 @@ desc: 让 bot 知道自己的本事并用起来：运行时能力表（命令 + 
 short_desc: 知道自己会什么，并在该用的时候用掉
 author: 鲸娘
 version: 2.9.14
-repo: https://github.com/your-name/astrbot_plugin_self_aware
+repo: repo: https://github.com/yunnuy173/astrbot_plugin_self_aware
 astrbot_version: ">=4.16,<5"
