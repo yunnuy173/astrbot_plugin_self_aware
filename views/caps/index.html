@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>能力面板</title>
+<script src="/api/plugin/page/bridge-sdk.js"></script>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#fff; --text:#1f2937; --muted:#6b7280;
+    --border:#e5e7eb; --accent:#2563eb; --warn:#b45309; --ok:#15803d; --danger:#dc2626;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#0f1420; --panel:#171d2b; --text:#e5e7eb; --muted:#9ca3af;
+           --border:#2a3446; --accent:#60a5fa; --warn:#fbbf24; --ok:#4ade80; --danger:#f87171; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:18px;background:var(--bg);color:var(--text);
+       font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1100px;margin:0 auto}
+  h1{font-size:18px;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:12px;margin-bottom:12px;word-break:break-all}
+  .tabs{display:flex;gap:6px;margin-bottom:12px;border-bottom:1px solid var(--border)}
+  .tab{padding:8px 14px;font-size:13px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent}
+  .tab.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+  button{background:var(--accent);color:#fff;border:0;border-radius:8px;
+         padding:7px 14px;font-size:13px;cursor:pointer}
+  button.ghost{background:transparent;color:var(--text);border:1px solid var(--border)}
+  button.danger{background:var(--danger)}
+  button:disabled{opacity:.55;cursor:default}
+  select{background:var(--panel);color:var(--text);border:1px solid var(--border);
+         border-radius:8px;padding:7px 10px;font-size:13px}
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;
+        background:rgba(37,99,235,.12);color:var(--accent);font-size:11px}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--border);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12px}
+  tr:last-child td{border-bottom:0}
+  tr.row{cursor:pointer}
+  tr.row:hover{background:rgba(37,99,235,.08)}
+  .meta{color:var(--muted);font-size:11px}
+  .tag{font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid var(--border);color:var(--muted)}
+  .tag.stale{color:var(--warn);border-color:currentColor}
+  .tag.ok{color:var(--ok);border-color:currentColor}
+  .doc{margin-top:12px;max-height:46vh;overflow:auto;padding:14px;white-space:pre-wrap;
+       word-break:break-word;font-size:13px;line-height:1.7}
+  .cols{display:grid;grid-template-columns:240px 1fr;gap:12px}
+  @media(max-width:760px){.cols{grid-template-columns:1fr}}
+  .files{max-height:62vh;overflow:auto}
+  .f{padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px}
+  .f:hover{background:rgba(37,99,235,.08)}
+  .f.on{background:rgba(37,99,235,.16);font-weight:600}
+  .f .meta{display:block;font-weight:400}
+  .viewer{max-height:62vh;overflow:auto;padding:14px;font-size:13px;line-height:1.7}
+  .item{border-bottom:1px dashed var(--border);padding:10px 0;white-space:pre-wrap;word-break:break-word}
+  .item:last-child{border-bottom:0}
+  .h{color:var(--muted);font-size:11px;margin-bottom:6px}
+  .q{color:var(--accent);font-size:12px;margin-bottom:6px}
+  .empty{color:var(--muted);padding:20px;text-align:center}
+  .ok{color:var(--ok)}
+  .bad{color:var(--danger)}
+  .warn{color:var(--warn)}
+  .nowrap{white-space:nowrap}
+  code{background:rgba(127,127,127,.14);padding:1px 5px;border-radius:5px;font-size:12px}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>能力面板</h1>
+  <div class="sub" id="dir">加载中…</div>
+
+  <div class="tabs">
+    <div class="tab on" data-tab="caps">插件</div>
+    <div class="tab" data-tab="thoughts">思考流</div>
+    <div class="tab" data-tab="actions">动作</div>
+  </div>
+
+  <!-- 插件 -->
+  <div id="pane-caps">
+    <div class="bar">
+      <button id="analyze">分析新插件（只处理过时的）</button>
+      <button class="ghost" id="force">全部重写</button>
+      <button class="ghost" id="refresh">刷新</button>
+      <button class="ghost" id="cleanlogs">清理日志</button>
+      <button class="danger" id="reset">一键重置</button>
+      <span class="pill" id="stat">-</span>
+    </div>
+    <div class="panel"><table id="tbl">
+      <thead><tr><th>插件</th><th>她的理解</th><th>入口</th><th>状态</th></tr></thead>
+      <tbody><tr><td colspan="4" class="empty">加载中…</td></tr></tbody>
+    </table></div>
+    <div class="doc panel hidden" id="doc"></div>
+  </div>
+
+  <!-- 思考流 -->
+  <div id="pane-thoughts" class="hidden">
+    <div class="bar">
+      <select id="level">
+        <option value="关">推理：关（不思考）</option>
+        <option value="低">推理：低</option>
+        <option value="中">推理：中</option>
+        <option value="高">推理：高</option>
+      </select>
+      <button id="save">保存等级</button>
+      <button class="ghost" id="trefresh">刷新</button>
+      <button class="danger" id="clear">清空全部</button>
+      <span class="pill" id="tstat">-</span>
+    </div>
+    <div class="cols">
+      <div class="panel"><div class="files" id="files"><div class="empty">暂无文件</div></div></div>
+      <div class="panel"><div class="viewer" id="viewer"><div class="empty">选左边的文件</div></div></div>
+    </div>
+  </div>
+
+  <!-- 动作 -->
+  <div id="pane-actions" class="hidden">
+    <div class="bar">
+      <button class="ghost" id="arefresh">刷新</button>
+      <span class="pill" id="astat">-</span>
+    </div>
+    <div class="panel"><table id="atbl">
+      <thead><tr><th>时间</th><th>做了什么</th><th>状态</th><th>结果</th><th>耗时</th></tr></thead>
+      <tbody><tr><td colspan="5" class="empty">加载中…</td></tr></tbody>
+    </table></div>
+  </div>
+</div>
+
+<script>
+var bridge = null;
+function getBridge(){
+  if (bridge) return bridge;
+  bridge = window.AstrBotPluginView || window.AstrBotPluginPage || null;
+  return bridge;
+}
+async function waitBridge(ms){
+  var t0 = Date.now();
+  while (Date.now() - t0 < ms){
+    var b = getBridge();
+    if (b){ try { if (b.ready) await b.ready(); } catch (e) {} return b; }
+    await new Promise(function(r){ setTimeout(r, 80); });
+  }
+  throw new Error("bridge 未就绪（请在 WebUI 的插件页里打开）");
+}
+async function api(method, path, body, params){
+  var b = await waitBridge(5000);
+  return method === "GET" ? b.apiGet(path, params || undefined) : b.apiPost(path, body || {});
+}
+function esc(s){
+  return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+function pick(r){ return r && (r.data || r) || {}; }
+function kb(n){ return (n/1024).toFixed(1) + " KB"; }
+
+/* ---------- 插件 ---------- */
+var items = [];
+function renderCaps(){
+  var tb = document.querySelector("#tbl tbody");
+  if (!items.length){ tb.innerHTML = '<tr><td colspan="4" class="empty">没有扫描到插件</td></tr>'; return; }
+  tb.innerHTML = items.map(function(it, i){
+    var st = it.stale
+      ? '<span class="tag stale">' + (it.fallback ? "待重试" : "过时") + '</span>'
+      : '<span class="tag ok">最新</span>';
+    if (it.manual) st += ' <span class="tag">说明书</span>';
+    return '<tr class="row" data-i="' + i + '">'
+      + '<td><div>' + esc(it.name) + '</div><div class="meta">' + esc(it.plugin) + '</div></td>'
+      + '<td>' + (esc(it.what) || '<span class="meta">还没分析</span>') + '</td>'
+      + '<td class="meta">' + it.commands + ' 命令 / ' + it.tools + ' 工具</td>'
+      + '<td>' + st + '</td></tr>';
+  }).join("");
+  Array.prototype.forEach.call(tb.querySelectorAll("tr.row"), function(tr){
+    tr.onclick = function(){ openDoc(items[+tr.getAttribute("data-i")]); };
+  });
+}
+async function loadCaps(){
+  var data = pick(await api("GET", "caps", null, { _t: Date.now() }));
+  if (data.status === "error") throw new Error(data.msg || "读取失败");
+  items = data.items || [];
+  var stale = items.filter(function(x){ return x.stale; }).length;
+  document.getElementById("dir").textContent = "数据目录：" + (data.dir || "-");
+  document.getElementById("stat").textContent =
+    items.length + " 个插件 · " + stale + " 个待分析 · 工具 " + (data.tool_count || 0) + " 个"
+    + ((data.blocked && data.blocked.length) ? " · 不直连 " + data.blocked.length : "");
+  renderCaps();
+}
+async function openDoc(it){
+  var box = document.getElementById("doc");
+  box.classList.remove("hidden");
+  box.textContent = "读取中…";
+  try{
+    var data = pick(await api("GET", "manual", null, { name: it.plugin, _t: Date.now() }));
+    box.textContent = data.text || ("（" + it.name + " 还没有说明书）");
+  }catch(e){ box.textContent = "读取失败：" + e.message; }
+}
+async function runReset(scope, title, note){
+  if (!confirm(title)) return;
+  try{
+    var data = pick(await api("POST", "reset", { scope: scope }));
+    if (data.status === "error") throw new Error(data.msg || "失败");
+    alert("删掉 " + (data.removed || 0) + " 个文件" + (note ? "；" + note : "") + "。");
+    await loadCaps();
+  }catch(e){ alert("出错：" + e.message); }
+}
+async function runAnalyze(force){
+  var btn = document.getElementById(force ? "force" : "analyze");
+  btn.disabled = true;
+  var old = btn.textContent;
+  btn.textContent = force ? "重写中…" : "分析中…";
+  try{
+    var data = pick(await api("POST", "analyze", { force: force }));
+    if (data.status === "error") throw new Error(data.msg || "失败");
+    var done = data.done || [];
+    alert(done.length ? ("处理了 " + done.length + " 个：" + done.join("、")) : "没有需要处理的，都是最新的。");
+    await loadCaps();
+  }catch(e){ alert("出错：" + e.message); }
+  finally { btn.disabled = false; btn.textContent = old; }
+}
+
+/* ---------- 思考流 ---------- */
+var cur = "", files = [];
+function renderFiles(){
+  var box = document.getElementById("files");
+  if (!files.length){ box.innerHTML = '<div class="empty">还没有记录</div>'; return; }
+  box.innerHTML = files.map(function(it){
+    return '<div class="f' + (it.name === cur ? " on" : "") + '" data-name="' + esc(it.name) + '">'
+      + esc(it.name) + '<span class="meta">' + kb(it.size) + " · " + esc(it.time) + "</span></div>";
+  }).join("");
+  Array.prototype.forEach.call(box.querySelectorAll(".f"), function(el){
+    el.onclick = function(){ cur = el.getAttribute("data-name"); renderFiles(); openContent(cur); };
+  });
+}
+async function loadThoughts(){
+  var data = pick(await api("GET", "files", null, { _t: Date.now() }));
+  files = data.items || [];
+  document.getElementById("tstat").textContent =
+    "等级 " + (data.effort || "-") + " · " + files.length + " 个文件";
+  if (data.effort) document.getElementById("level").value = data.effort;
+  var names = files.map(function(it){ return it.name; });
+  if (!cur || names.indexOf(cur) < 0) cur = names.length ? names[0] : "";
+  renderFiles();
+  if (cur) await openContent(cur);
+}
+async function openContent(name){
+  var viewer = document.getElementById("viewer");
+  viewer.innerHTML = '<div class="empty">读取中…</div>';
+  try{
+    var data = pick(await api("GET", "content", null, { name: name, _t: Date.now() }));
+    if (data.status === "error"){ viewer.innerHTML = '<div class="empty">' + esc(data.msg || "读不到") + "</div>"; return; }
+    var blocks = (data.text || "").split("-".repeat(40)).map(function(b){ return b.trim(); }).filter(Boolean);
+    if (!blocks.length){ viewer.innerHTML = '<div class="empty">这个文件是空的</div>'; return; }
+    blocks.reverse();
+    viewer.innerHTML = blocks.map(function(b){
+      var lines = b.split("\n");
+      var head = lines.shift() || "";
+      var q = "";
+      for (var i = 0; i < lines.length; i++){
+        if (lines[i].indexOf("问：") === 0){ q = lines.splice(i,1)[0]; break; }
+      }
+      return '<div class="item"><div class="h">' + esc(head) + "</div>"
+        + (q ? '<div class="q">' + esc(q) + "</div>" : "") + esc(lines.join("\n")) + "</div>";
+    }).join("");
+  }catch(e){ viewer.innerHTML = '<div class="empty">出错：' + esc(e.message) + "</div>"; }
+}
+
+/* ---------- 动作记录 ---------- */
+function stLabel(s){
+  if (s === "done") return '<span class="ok">成功</span>';
+  if (s === "failed") return '<span class="bad">失败</span>';
+  if (s === "running") return '<span class="warn">进行中</span>';
+  return esc(s || "-");
+}
+async function loadActions(){
+  var tb = document.querySelector("#atbl tbody");
+  tb.innerHTML = '<tr><td colspan="5" class="empty">读取中…</td></tr>';
+  try{
+    var data = pick(await api("GET", "actions", null, { limit: 50, _t: Date.now() }));
+    if (data.status === "error"){ tb.innerHTML = '<tr><td colspan="5" class="empty">' + esc(data.msg) + "</td></tr>"; return; }
+    var items = data.items || [];
+    document.getElementById("astat").textContent = "最近 " + items.length + " 条 · 共 " + (data.total || 0) + " 条";
+    if (!items.length){
+      tb.innerHTML = '<tr><td colspan="5" class="empty">她还没有执行过任何命令</td></tr>';
+      return;
+    }
+    tb.innerHTML = items.map(function(it){
+      var what = (it.cmd || "") + (it.args ? " " + it.args : "");
+      var took = (it.took == null) ? "-" : (it.took + " 秒");
+      return "<tr><td class='nowrap'>" + esc(it.time) + "</td>"
+        + "<td><code>" + esc(what) + "</code>"
+        + (it.target ? "<div class='meta'>" + esc(it.target) + "</div>" : "") + "</td>"
+        + "<td>" + stLabel(it.status) + "</td>"
+        + "<td>" + esc(it.note || "-") + "</td>"
+        + "<td class='nowrap'>" + esc(took) + "</td></tr>";
+    }).join("");
+  }catch(e){ tb.innerHTML = '<tr><td colspan="5" class="empty">出错：' + esc(e.message) + "</td></tr>"; }
+}
+
+/* ---------- 交互 ---------- */
+Array.prototype.forEach.call(document.querySelectorAll(".tab"), function(t){
+  t.onclick = function(){
+    Array.prototype.forEach.call(document.querySelectorAll(".tab"), function(x){ x.classList.remove("on"); });
+    t.classList.add("on");
+    var want = t.getAttribute("data-tab");
+    document.getElementById("pane-caps").classList.toggle("hidden", want !== "caps");
+    document.getElementById("pane-thoughts").classList.toggle("hidden", want !== "thoughts");
+    document.getElementById("pane-actions").classList.toggle("hidden", want !== "actions");
+    if (want === "thoughts") loadThoughts().catch(function(e){ alert(e.message); });
+    if (want === "actions") loadActions().catch(function(e){ alert(e.message); });
+  };
+});
+document.getElementById("refresh").onclick = function(){ loadCaps().catch(function(e){ alert(e.message); }); };
+document.getElementById("arefresh").onclick = function(){ loadActions().catch(function(e){ alert(e.message); }); };
+document.getElementById("analyze").onclick = function(){ runAnalyze(false); };
+document.getElementById("force").onclick = function(){
+  if (!confirm("把每个插件都重新分析一遍（每个插件一次模型调用，可能较慢）？")) return;
+  runAnalyze(true);
+};
+document.getElementById("reset").onclick = function(){
+  runReset("build",
+    "一键重置会删掉：能力表缓存、所有插件画像、所有说明书、工具黑名单，\n然后重新扫描（画像要重新分析，会花模型调用）。\n思考流和日志不动。继续？",
+    "已重扫");
+};
+document.getElementById("cleanlogs").onclick = function(){
+  runReset("logs",
+    "清理日志会删掉：logs/ 运行日志 和 thoughts/ 思考流，历史不可恢复。继续？",
+    "");
+};
+document.getElementById("trefresh").onclick = function(){ loadThoughts().catch(function(e){ alert(e.message); }); };
+document.getElementById("save").onclick = async function(){
+  try{
+    await api("POST", "level", { effort: document.getElementById("level").value });
+    await loadThoughts();
+    alert("已设为：" + document.getElementById("level").value);
+  }catch(e){ alert("保存失败：" + e.message); }
+};
+document.getElementById("clear").onclick = async function(){
+  if (!confirm("删掉所有思考流文件？")) return;
+  try{
+    await api("POST", "clear", {});
+    cur = "";
+    document.getElementById("viewer").innerHTML = '<div class="empty">已清空</div>';
+    await loadThoughts();
+  }catch(e){ alert("清空失败：" + e.message); }
+};
+
+(function(){ loadCaps().catch(function(e){ document.getElementById("dir").textContent = "出错：" + e.message; }); })();
+</script>
+</body>
+</html>

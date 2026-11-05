@@ -1,0 +1,229 @@
+{
+  "auto_dispatch": {
+    "description": "说话就直接执行（总开关）",
+    "type": "bool",
+    "default": true,
+    "hint": "开着时，说「给我唱首海底」会真的去点歌；关掉就只聊天不执行"
+  },
+  "auto_profile": {
+    "description": "自动给插件写能力画像和说明书",
+    "type": "bool",
+    "default": true,
+    "hint": "装完插件不用管它自己会分析；结果在数据目录的 profiles/ 和 manuals/ 里，可以直接改"
+  },
+  "tool_dispatch": {
+    "description": "没有命令的插件也让她用",
+    "type": "bool",
+    "default": true,
+    "hint": "比如表情包管理器没有 /发表情 这类命令，靠这条也能用；只对单参数工具自动填参"
+  },
+  "inject_mode": {
+    "description": "每次对话给她看多少能力",
+    "type": "string",
+    "default": "semantic",
+    "options": [
+      "semantic",
+      "always",
+      "off"
+    ],
+    "hint": "semantic=只说相关的（推荐）；always=每次都带全清单（费 token）；off=不注入"
+  },
+  "match_threshold": {
+    "description": "判断「这句话踩到哪项能力」的严格程度",
+    "type": "float",
+    "default": 0.7,
+    "slider": {
+      "min": 0.4,
+      "max": 4.0,
+      "step": 0.1
+    },
+    "hint": "老把不该执行的话执行了、老乱用功能 → 调高；该用的时候不用 → 调低"
+  },
+  "llm_route": {
+    "description": "规则都不中时，让模型挑一条指令",
+    "type": "bool",
+    "default": true,
+    "hint": "更准，但每句话多一次模型调用；嫌费钱或嫌慢可以关"
+  },
+  "generic_dispatch": {
+    "description": "靠命令名和说明猜用法（通用兜底）",
+    "type": "bool",
+    "default": true,
+    "hint": "适合没写规则的新插件；误触发多的时候先关这条"
+  },
+  "builtin_rules": {
+    "description": "启用内置的写死规则（歌、图、梗等）",
+    "type": "bool",
+    "default": false,
+    "hint": "默认关：靠画像和语义就够了。开它等于回到手写正则那套"
+  },
+  "mini_inject": {
+    "description": "被问「你会什么」时给她完整清单",
+    "type": "bool",
+    "default": true
+  },
+  "max_chars": {
+    "description": "能力提示最多占多少字",
+    "type": "int",
+    "default": 1200,
+    "slider": {
+      "min": 300,
+      "max": 3000,
+      "step": 100
+    },
+    "hint": "太长会挤掉人格和聊天内容；够用就行"
+  },
+  "notify_failure": {
+    "description": "自动执行失败时补一句说明",
+    "type": "bool",
+    "default": true,
+    "hint": "工具或命令没跑起来时，她会说一句「没弄成」而不是装没事"
+  },
+  "diagnose_failure": {
+    "description": "失败时自己看日志分析原因",
+    "type": "bool",
+    "default": true,
+    "hint": "失败后花一次模型调用，读最近的日志给出可能原因；嫌费钱可以关，只保留「没弄成」"
+  },
+  "extra_rules": {
+    "description": "自己加直连规则，一行一条：关键词=>命令",
+    "type": "string",
+    "default": "",
+    "hint": "例：roll=>/roll {1}　（{1} 是你说的话里剩下的部分）"
+  },
+  "effort": {
+    "description": "推理档位",
+    "type": "string",
+    "default": "中",
+    "options": [
+      "关",
+      "低",
+      "中",
+      "高"
+    ],
+    "hint": "也可以在聊天里直接发 /推理 高"
+  },
+  "capture_reasoning": {
+    "description": "记录思考流",
+    "type": "bool",
+    "default": true,
+    "hint": "只写文件，不影响聊天速度"
+  },
+  "show_in_chat": {
+    "description": "把思考流发到聊天里",
+    "type": "bool",
+    "default": false,
+    "hint": "建议只在私聊开；群里会刷屏"
+  },
+  "only_private": {
+    "description": "思考流只在私聊显示",
+    "type": "bool",
+    "default": true
+  },
+  "show_max_chars": {
+    "description": "聊天里最多显示多少字思考流",
+    "type": "int",
+    "default": 400,
+    "slider": {
+      "min": 100,
+      "max": 1500,
+      "step": 50
+    }
+  },
+  "merge_thought": {
+    "description": "能力命中写进思考流",
+    "type": "bool",
+    "default": true,
+    "hint": "想看「她为什么用这个功能」就开着"
+  },
+  "thought_dir": {
+    "description": "思考流存哪个目录",
+    "type": "string",
+    "default": "",
+    "hint": "留空=插件数据目录下的 thoughts；想和别的一起看就填同一个目录"
+  },
+  "voices_dir": {
+    "description": "声线目录（.pth 文件）",
+    "type": "string",
+    "default": "",
+    "hint": "留空=不展示声线；填了会在能力提示里带上可用声线名"
+  },
+  "plugins_dir": {
+    "description": "插件目录",
+    "type": "string",
+    "default": "",
+    "hint": "留空=自动识别，一般不用填"
+  },
+  "capture_logs": {
+    "description": "记录运行日志",
+    "type": "bool",
+    "default": true,
+    "hint": "开着她才能用 /日志 自己查问题；存在 logs/ 下"
+  },
+  "auto_compat": {
+    "description": "（旧）启用「自兼容」正则规则",
+    "type": "bool",
+    "default": true,
+    "hint": "早期让模型写正则的机制，已被画像取代；没有特殊需要别动"
+  },
+  "enable_balance_alert": {
+    "description": "余额低时主动提醒",
+    "type": "bool",
+    "default": true,
+    "hint": "关掉就只保留 /余额 手动查询"
+  },
+  "balance_threshold": {
+    "description": "低于多少元开始提醒",
+    "type": "float",
+    "default": 5.0,
+    "slider": {
+      "min": 1,
+      "max": 50,
+      "step": 1
+    }
+  },
+  "balance_check_minutes": {
+    "description": "多久查一次余额（分钟）",
+    "type": "int",
+    "default": 30,
+    "slider": {
+      "min": 5,
+      "max": 720,
+      "step": 5
+    }
+  },
+  "balance_cooldown_hours": {
+    "description": "提醒一次之后隔几小时再说",
+    "type": "float",
+    "default": 2.0,
+    "slider": {
+      "min": 0,
+      "max": 24,
+      "step": 0.5
+    }
+  },
+  "beg_target_session": {
+    "description": "余额提醒发到哪个会话",
+    "type": "string",
+    "default": "",
+    "hint": "格式 平台:消息类型:对象id，例 aiocqhttp:FriendMessage:123456789；留空=不主动提醒"
+  },
+  "balance_api_url": {
+    "description": "余额接口地址",
+    "type": "string",
+    "default": "",
+    "hint": "留空=DeepSeek。OpenAI 这类没有余额接口的服务会显示「查不到」"
+  },
+  "balance_api_key": {
+    "description": "API Key",
+    "type": "string",
+    "default": "",
+    "hint": "留空就自动从 AstrBot 的模型配置里读，一般不用填"
+  },
+  "self_report": {
+    "description": "她自己动手之后，用自己的口吻补一句",
+    "hint": "开了以后，她每次自己执行完都会说一句\"成了/没成\"。话会变多，但更像有意识。",
+    "type": "bool",
+    "default": true
+  }
+}
