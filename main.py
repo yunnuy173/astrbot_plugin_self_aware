@@ -182,6 +182,8 @@ class _LogBook(object):
     def add(self, msg, level="INFO"):
         try:
             line = "[%s] [%s] %s" % (time.strftime("%H:%M:%S"), level, str(msg))
+            if self.lines and self.lines[-1].split("] ", 2)[-1] == line.split("] ", 2)[-1]:
+                return
             self.lines.append(line)
             if len(self.lines) > self.keep:
                 del self.lines[:len(self.lines) - self.keep]
@@ -556,6 +558,7 @@ class Main(Star):
         if not force and cached.get("fp") == fp and cached.get("caps"):
             self._caps = cached["caps"]
             self._fp = fp
+            self._prune_once({c.get("plugin") or "" for c in self._caps})
             return self._caps
 
         off = self._disabled()
@@ -619,8 +622,41 @@ class Main(Star):
         self._caps = caps
         self._fp = fp
         _write_json(CAP_CACHE, {"fp": fp, "ts": time.time(), "caps": caps})
+        self._prune_once({c.get("plugin") or "" for c in caps})
         _log("扫描到 %d 个插件能力（目录里 %d 个文件夹）" % (len(caps), len(names)))
         return caps
+
+    def _prune_once(self, live):
+        """一个进程只扫一遍磁盘，别每条消息都去 listdir"""
+        if getattr(self, "_pruned", False):
+            return
+        self._pruned = True
+        self._prune_gone(live)
+
+    def _prune_gone(self, live):
+        """插件目录都没了的，把它的旧画像/说明书清掉，别留着当幽灵能力。
+        只是停用（目录还在）的不动，免得再启用又要重新画像。"""
+        alive = live | {PLUGIN_NAME}
+        base = self._plugins_dir()
+        gone = []
+        for folder in (PROFILE_DIR, MANUAL_DIR):
+            try:
+                files = os.listdir(folder)
+            except Exception:
+                continue
+            for fn in files:
+                if not fn.endswith((".json", ".txt")):
+                    continue
+                stem = fn.rsplit(".", 1)[0]
+                if stem in alive or os.path.isdir(os.path.join(base, stem)):
+                    continue
+                try:
+                    os.remove(os.path.join(folder, fn))
+                    gone.append(fn)
+                except Exception as e:
+                    _log("清不掉旧档案 %s：%r" % (fn, e))
+        if gone:
+            _log("清掉 %d 个已卸载插件的旧档案：%s" % (len(gone), "、".join(gone[:8])))
 
     # ---------- 自兼容：让模型读插件，自己写规则 ----------
     RULES_CACHE = os.path.join(CACHE_DIR, "auto_rules.json")
@@ -755,8 +791,21 @@ class Main(Star):
             return False
         return True
 
+    # 自动规则是某个时刻的快照，插件卸载/停用后它并不知道；这里只提示一次，别刷屏
+    _AR_GONE_LOGGED = set()
+
     def _dispatch_by_auto(self, text):
+        live = set()
+        for cap in self._scan():
+            live.add(cap.get("plugin") or "")
         for r in self._auto_rules():
+            pl = r.get("plugin") or ""
+            if pl and pl not in live:
+                # 这条规则属于一个已经不在能力表里的插件，照着它执行只会扑空
+                if pl not in self._AR_GONE_LOGGED:
+                    self._AR_GONE_LOGGED.add(pl)
+                    _log("自动规则跳过：%s 已不在能力表，它的旧规则不再参与" % pl)
+                continue
             try:
                 m = re.match(r["pattern"], text, re.S | re.I)
             except Exception:
@@ -2336,6 +2385,7 @@ class Main(Star):
             + "可选能力（名字：说明（模板））：\n" + listing + "\n\n"
             "注意：如果这句话是在接着上文让机器人做事（哪怕只有一两个词），也要选出来；"
             "如果只是聊天、回答、感慨，就输出 {\"name\":null}。\n"
+            "如果对方让你自己决定（挑一个、随便来个、你看着办），参数由你自己定，别留空、别反问。\n"
             "只输出 JSON：{\"name\":\"能力名字\",\"arg\":\"参数\"}。不要解释。\n"
             "用户刚说：" + t
         )
@@ -2368,14 +2418,48 @@ class Main(Star):
             return None
         _log("模型层：选了 %s / %s" % (name[:20], arg[:20]))
         if pick["template"] and "{arg}" in pick["template"]:
-            if not _clean_arg(arg, limit=30):
-                _log("模型层：%s 需要参数但没给，放弃" % name[:20])
-                return None
-            return pick["template"].replace("{arg}", _clean_arg(arg, limit=30))
+            val = _clean_arg(arg, limit=30)
+            if not val:
+                # 对方让自己挑 → 她得自己定一个，别留空、别反问
+                val = await self._pick_arg_self(pick, prompt_t=t, ctx=ctx)
+                if not val:
+                    _log("模型层：%s 需要参数，自己也没定出来，放弃" % name[:20])
+                    return None
+                _log("模型层：参数自己定的 → %s" % val[:20])
+            return pick["template"].replace("{arg}", val)
         # 没有模板就不知道正确写法，宁可放弃，也不要拼出错误的 /点歌
         if pick.get("kind") == "regex" or not pick["key"]:
             return None
         return ("/%s %s" % (pick["key"], _clean_arg(arg, limit=30))).strip()
+
+    async def _pick_arg_self(self, pick, prompt_t="", ctx=""):
+        """参数空着的时候，让她结合上下文自己挑一个"""
+        try:
+            provider = self.context.get_using_provider()
+        except Exception:
+            provider = None
+        if not provider:
+            return ""
+        p = (
+            "对方让你自己决定，但你还差一个参数没定。\n"
+            + (("最近的对话：\n" + ctx + "\n\n") if ctx else "")
+            + "你要执行的命令是：%s（%s）\n"
+            "对方刚说：%s\n\n"
+            "请直接给出一个你认为合适的参数值（一个名字/关键词，别带引号、别解释、别反问）；"
+            "真的没法自己定就输出 NONE。"
+            % (pick.get("label") or pick.get("key"), pick.get("doc") or "", prompt_t)
+        )
+        try:
+            resp = await asyncio.wait_for(
+                provider.text_chat(prompt=p, contexts=[], system_prompt=None), timeout=15)
+            v = (getattr(resp, "completion_text", "") or "").strip()
+        except Exception as e:
+            _log("自己定参数失败: %r" % e)
+            return ""
+        v = v.strip("《》「」\"'“” 。，,")
+        if not v or v.upper() == "NONE":
+            return ""
+        return _clean_arg(v, limit=30)
 
     def _hit_to_cmd(self, text, caps):
         """命中的能力里有"搜索/取物"类指令 → 直接把话变成那个指令"""
