@@ -1,6 +1,6 @@
 # 能力自省 (astrbot_plugin_self_aware)
 
-让 bot **认识、理解并使用**自己的能力——包括那些**根本没写命令**的插件。
+让 bot **认识、理解并使用**自己的能力——命令、工具、正则路由，都算数。
 
 装了一堆插件，bot 却不知道"我能唱歌""我能发表情包"——被问就装傻，该用时想不到。
 这个插件把"你会什么"变成它真正能用的东西，并且让它做完之后知道自己做了什么。
@@ -150,7 +150,7 @@ plugin_data/astrbot_plugin_self_aware/profiles/<插件名>.json
 |---|---|---|
 | `auto_dispatch` | `true` | 说话就直接执行（总开关） |
 | `auto_profile` | `true` | 自动写画像和说明书 |
-| `tool_dispatch` | `true` | 没有命令的插件也能用 |
+| `tool_dispatch` | `true` | 插件注册了工具（llm_tools）的也能用 |
 | `inject_mode` | `semantic` | 每次给她看多少能力 |
 | `match_threshold` | `1.2` | 匹配严格度，误触发就调高 |
 | `llm_route` | `true` | 规则不中时让模型挑一条指令 |

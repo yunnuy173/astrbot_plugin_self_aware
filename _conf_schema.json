@@ -12,10 +12,10 @@
     "hint": "装完插件不用管它自己会分析；结果在数据目录的 profiles/ 和 manuals/ 里，可以直接改"
   },
   "tool_dispatch": {
-    "description": "没有命令的插件也让她用",
+    "description": "插件注册了工具的也让她用",
     "type": "bool",
     "default": true,
-    "hint": "比如表情包管理器没有 /发表情 这类命令，靠这条也能用；只对单参数工具自动填参"
+    "hint": "有些插件没有 /命令，但注册了工具（llm_tools），靠这条也能用上；只对单参数工具自动填参。既没命令也没工具的插件，目前用不了"
   },
   "inject_mode": {
     "description": "每次对话给她看多少能力",
